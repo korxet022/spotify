@@ -9,7 +9,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- CONFIGURACIÓN DE SUPABASE (Desde secrets de Streamlit) ---
+# --- CONFIGURACIÓN DE SUPABASE ---
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
@@ -39,22 +39,23 @@ st.markdown("Visualización en tiempo real de tu historial de reproducciones con
 if df.empty:
     st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización o lanza el script manual.")
 else:
-    # --- BARRA LATERAL: FILTRO DE CALENDARIO ---
-    st.sidebar.header("🔍 Filtros de Fecha")
+    # ==========================================
+    # --- BARRA LATERAL: FILTROS INTERACTIVOS ---
+    # ==========================================
+    st.sidebar.header("🔍 Filtros Interactivos")
     
-    # Obtener fechas mínimo y máximo del historial para los límites del calendario
+    # 1. Filtro de Calendario
     min_date = df['played_at'].min().date()
     max_date = df['played_at'].max().date()
     
-    # Selector de rango de fechas en la barra lateral
     date_range = st.sidebar.date_input(
-        "Selecciona el periodo",
+        "📅 Periodo de fechas",
         value=(min_date, max_date),
         min_value=min_date,
         max_value=max_date
     )
 
-    # Filtrar el DataFrame según el rango de fechas seleccionado
+    # Aplicar filtro de fecha
     if isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range
         mask = (df['played_at'].dt.date >= start_date) & (df['played_at'].dt.date <= end_date)
@@ -62,17 +63,39 @@ else:
     else:
         df_filtered = df
 
+    # 2. Filtro por Artista Específico
+    artistas_disponibles = sorted(df_filtered['artist_name'].dropna().unique())
+    artista_seleccionado = st.sidebar.selectbox(
+        "🎤 Filtrar por Artista", 
+        ["Todos los artistas"] + list(artistas_disponibles)
+    )
+
+    if artista_seleccionado != "Todos los artistas":
+        df_filtered = df_filtered[df_filtered['artist_name'] == artista_seleccionado]
+
+    # 3. Filtro por Canción Específica (se adapta al artista si se seleccionó uno)
+    canciones_disponibles = sorted(df_filtered['track_name'].dropna().unique())
+    cancion_seleccionada = st.sidebar.selectbox(
+        "🎶 Filtrar por Canción", 
+        ["Todas las canciones"] + list(canciones_disponibles)
+    )
+
+    if cancion_seleccionada != "Todas las canciones":
+        df_filtered = df_filtered[df_filtered['track_name'] == cancion_seleccionada]
+
+    # Botón para limpiar filtros fácilmente
+    if st.sidebar.button("🔄 Restablecer Filtros"):
+        st.rerun()
+
+    # ==========================================
     # --- MÉTRICAS Y KPIS PRINCIPALES ---
+    # ==========================================
     total_reproducciones = len(df_filtered)
-    
-    # Cálculo de tiempo escuchado en minutos (duración_ms / 60,000)
     total_ms = df_filtered['duration_ms'].sum() if 'duration_ms' in df_filtered.columns else 0
     total_minutos = int(total_ms / 60000)
-    
     artistas_unicos = df_filtered['artist_name'].nunique()
     canciones_unicas = df_filtered['track_name'].nunique()
 
-    # Mostramos 4 tarjetas de KPI distribuidas en columnas
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("🎧 Reproducciones", total_reproducciones)
     col2.metric("⏱️ Tiempo Escuchado", f"{total_minutos} min")
@@ -81,7 +104,9 @@ else:
 
     st.markdown("---")
 
-    # --- SECCIÓN DE GRÁFICOS (Basados en los datos filtrados) ---
+    # ==========================================
+    # --- SECCIÓN DE GRÁFICOS / RESÚMENES ---
+    # ==========================================
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
@@ -90,7 +115,7 @@ else:
         if not top_artistas.empty:
             st.bar_chart(top_artistas)
         else:
-            st.info("No hay datos para este rango de fechas.")
+            st.info("No hay datos para esta selección.")
 
     with col_g2:
         st.subheader("🎵 Canciones Más Reproducidas")
@@ -98,12 +123,14 @@ else:
         if not top_canciones.empty:
             st.bar_chart(top_canciones)
         else:
-            st.info("No hay datos para este rango de fechas.")
+            st.info("No hay datos para esta selección.")
 
     st.markdown("---")
 
+    # ==========================================
     # --- TABLA DE HISTORIAL DETALLADO ---
-    st.subheader("📜 Historial Detallado")
+    # ==========================================
+    st.subheader(f"📜 Historial Detallado ({len(df_filtered)} registros)")
     st.dataframe(
         df_filtered[['played_at', 'track_name', 'artist_name', 'album_name', 'external_url']],
         use_container_width=True
