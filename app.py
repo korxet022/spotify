@@ -57,8 +57,7 @@ def formatear_tiempo_total(ms):
         return f"{segundos}s"
 
 # --- TÍTULO Y CABECERA ---
-st.title("🎵 Mi Dashboard de Spotify")
-st.markdown("Visualización avanzada en tiempo real de tu historial musical.")
+st.title("🎵 Dashboard de Spotify")
 
 if df.empty:
     st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización o lanza el script manual.")
@@ -77,7 +76,7 @@ else:
         st.session_state.canciones_seleccionadas = []
 
     # ==========================================
-    # --- BARRA LATERAL: FILTROS MULTIPLES ---
+    # --- BARRA LATERAL: FILTROS MÚLTIPLES ---
     # ==========================================
     st.sidebar.header("🔍 Filtros Avanzados")
     
@@ -103,7 +102,7 @@ else:
         key="artistas_seleccionados"
     )
 
-    # Filtrar canciones disponibles opcionalmente según los artistas elegidos (o todo el df)
+    # Filtrar canciones disponibles según los artistas elegidos (o todo el df)
     df_para_canciones = df[df['artist_name'].isin(artistas_seleccionados)] if artistas_seleccionados else df
     canciones_disponibles = sorted(df_para_canciones['track_name'].dropna().unique())
     
@@ -136,11 +135,12 @@ else:
     artistas_unicos = df_filtered['artist_name'].nunique()
     canciones_unicas = df_filtered['track_name'].nunique()
 
-    # Promedio diario
-    if not df_filtered.empty:
-        dias_unicos = df_filtered['played_at'].dt.date.nunique()
-        dias_unicos = max(dias_unicos, 1)
-        promedio_diario_reps = round(total_reproducciones / dias_unicos, 1)
+    # Promedio diario basado en el rango total de fechas seleccionado
+    if not df_filtered.empty and isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+        dias_totales_rango = (end_date - start_date).days + 1
+        dias_totales_rango = max(dias_totales_rango, 1)
+        promedio_diario_reps = round(total_reproducciones / dias_totales_rango, 1)
     else:
         promedio_diario_reps = 0
 
