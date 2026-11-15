@@ -63,40 +63,69 @@ st.markdown("Visualización avanzada en tiempo real de tu historial musical.")
 if df.empty:
     st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización o lanza el script manual.")
 else:
+    min_date = df['played_at'].min().date()
+    max_date = df['played_at'].max().date()
+
+    # ==========================================
+    # --- INICIALIZACIÓN DE SESSION STATE ---
+    # ==========================================
+    if "date_range" not in st.session_state:
+        st.session_state.date_range = (min_date, max_date)
+    if "artistas_seleccionados" not in st.session_state:
+        st.session_state.artistas_seleccionados = []
+    if "canciones_seleccionadas" not in st.session_state:
+        st.session_state.canciones_seleccionadas = []
+
     # ==========================================
     # --- BARRA LATERAL: FILTROS MULTIPLES ---
     # ==========================================
     st.sidebar.header("🔍 Filtros Avanzados")
     
-    min_date = df['played_at'].min().date()
-    max_date = df['played_at'].max().date()
-    
+    # Botón de restablecer filtros funcional
+    if st.sidebar.button("🔄 Restablecer Filtros"):
+        st.session_state.date_range = (min_date, max_date)
+        st.session_state.artistas_seleccionados = []
+        st.session_state.canciones_seleccionadas = []
+        st.rerun()
+
     date_range = st.sidebar.date_input(
         "📅 Periodo de fechas",
-        value=(min_date, max_date),
         min_value=min_date,
-        max_value=max_date
+        max_value=max_date,
+        key="date_range"
     )
+
+    # Las opciones de artistas se basan en el dataset global para no perder la selección al cambiar fechas
+    artistas_disponibles = sorted(df['artist_name'].dropna().unique())
+    artistas_seleccionados = st.sidebar.multiselect(
+        "🎤 Filtrar por Artistas", 
+        artistas_disponibles,
+        key="artistas_seleccionados"
+    )
+
+    # Filtrar canciones disponibles opcionalmente según los artistas elegidos (o todo el df)
+    df_para_canciones = df[df['artist_name'].isin(artistas_seleccionados)] if artistas_seleccionados else df
+    canciones_disponibles = sorted(df_para_canciones['track_name'].dropna().unique())
+    
+    canciones_seleccionadas = st.sidebar.multiselect(
+        "🎶 Filtrar por Canciones", 
+        canciones_disponibles,
+        key="canciones_seleccionadas"
+    )
+
+    # Aplicar todos los filtros de forma acumulativa sobre una copia del DataFrame
+    df_filtered = df.copy()
 
     if isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range
-        mask = (df['played_at'].dt.date >= start_date) & (df['played_at'].dt.date <= end_date)
-        df_filtered = df.loc[mask]
-    else:
-        df_filtered = df
+        mask = (df_filtered['played_at'].dt.date >= start_date) & (df_filtered['played_at'].dt.date <= end_date)
+        df_filtered = df_filtered.loc[mask]
 
-    artistas_disponibles = sorted(df_filtered['artist_name'].dropna().unique())
-    artistas_seleccionados = st.sidebar.multiselect("🎤 Filtrar por Artistas", artistas_disponibles)
     if artistas_seleccionados:
         df_filtered = df_filtered[df_filtered['artist_name'].isin(artistas_seleccionados)]
 
-    canciones_disponibles = sorted(df_filtered['track_name'].dropna().unique())
-    canciones_seleccionadas = st.sidebar.multiselect("🎶 Filtrar por Canciones", canciones_disponibles)
     if canciones_seleccionadas:
         df_filtered = df_filtered[df_filtered['track_name'].isin(canciones_seleccionadas)]
-
-    if st.sidebar.button("🔄 Restablecer Filtros"):
-        st.rerun()
 
     # ==========================================
     # --- MÉTRICAS Y KPIS PRINCIPALES ---
