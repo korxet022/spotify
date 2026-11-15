@@ -127,53 +127,47 @@ else:
     st.markdown("---")
 
     # ==========================================
-    # --- RANKINGS INTERACTIVOS (CLICABLES) ---
+    # --- SECCIÓN DE GRÁFICOS CON PESTAÑAS ---
     # ==========================================
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
         st.subheader("🔥 Artistas Más Reproducidos")
-        st.caption("💡 Haz clic en las filas de la tabla para filtrar automáticamente.")
         
-        top_artistas_df = df_filtered['artist_name'].value_counts().reset_index()
+        top_artistas = df_filtered['artist_name'].value_counts().head(10)
+        top_artistas_df = top_artistas.reset_index()
         top_artistas_df.columns = ['Artista', 'Reproducciones']
+
+        # Pestañas para elegir entre Gráfico (por defecto) o Lista
+        tab_grafico_a, tab_lista_a = st.tabs(["📊 Gráfico", "📋 Ver Lista"])
         
-        # Tabla interactiva con selección activada
-        evento_artista = st.dataframe(
-            top_artistas_df.head(10),
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="multi-row"
-        )
-        
-        # Si el usuario hace clic en filas de artistas, filtramos por ellos automáticamente
-        if evento_artista and evento_artista.selection.rows:
-            seleccionados_indices = evento_artista.selection.rows
-            artistas_clicados = top_artistas_df.iloc[seleccionados_indices]['Artista'].tolist()
-            df_filtered = df_filtered[df_filtered['artist_name'].isin(artistas_clicados)]
+        with tab_grafico_a:
+            if not top_artistas.empty:
+                st.bar_chart(top_artistas)
+            else:
+                st.info("No hay datos para esta selección.")
+                
+        with tab_lista_a:
+            st.dataframe(top_artistas_df, use_container_width=True, hide_index=True)
 
     with col_g2:
         st.subheader("🎵 Canciones Más Reproducidas")
-        st.caption("💡 Haz clic en las filas de la tabla para filtrar automáticamente.")
         
-        top_canciones_df = df_filtered['track_name'].value_counts().reset_index()
+        top_canciones = df_filtered['track_name'].value_counts().head(10)
+        top_canciones_df = top_canciones.reset_index()
         top_canciones_df.columns = ['Canción', 'Reproducciones']
+
+        # Pestañas para elegir entre Gráfico (por defecto) o Lista
+        tab_grafico_c, tab_lista_c = st.tabs(["📊 Gráfico", "📋 Ver Lista"])
         
-        # Tabla interactiva con selección activada
-        evento_cancion = st.dataframe(
-            top_canciones_df.head(10),
-            use_container_width=True,
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="multi-row"
-        )
-        
-        # Si el usuario hace clic en canciones, filtramos por ellas
-        if evento_cancion and evento_cancion.selection.rows:
-            seleccionados_indices_c = evento_cancion.selection.rows
-            canciones_clicadas = top_canciones_df.iloc[seleccionados_indices_c]['Canción'].tolist()
-            df_filtered = df_filtered[df_filtered['track_name'].isin(canciones_clicadas)]
+        with tab_grafico_c:
+            if not top_canciones.empty:
+                st.bar_chart(top_canciones)
+            else:
+                st.info("No hay datos para esta selección.")
+                
+        with tab_lista_c:
+            st.dataframe(top_canciones_df, use_container_width=True, hide_index=True)
 
     st.markdown("---")
 
@@ -182,7 +176,6 @@ else:
     # ==========================================
     st.subheader(f"📜 Historial Detallado ({len(df_filtered)} registros)")
     
-    # Preparar dataframe limpio sin URL y con duración formateada en min:seg
     df_display = df_filtered.copy()
     df_display['Duración'] = df_display['duration_ms'].apply(formatear_duracion)
     
