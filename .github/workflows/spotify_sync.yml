@@ -3,10 +3,10 @@ name: Sincronizar Spotify con Supabase
 on:
   repository_dispatch:
     types: [sincronizar_spotify]
-  workflow_dispatch: # Mantiene el botón manual por si quieres probarlo
+  workflow_dispatch:
 
 jobs:
-  sync:
+  sincronizar:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout del repositorio
@@ -17,11 +17,15 @@ jobs:
         with:
           python-version: '3.10'
           
-      - name: Instalar dependencias
+      - name: Instalar librerías
         run: |
-          pip install spotipy pandas supabase pylast
+          pip install spotipy supabase
           
-      - name: Ejecutar script
+      - name: Restaurar archivo .cache de Spotify desde los secretos
+        run: |
+          echo '${{ secrets.SPOTIPY_CACHE }}' > .cache
+          
+      - name: Ejecutar script de sincronización
         env:
           SPOTIPY_CLIENT_ID: ${{ secrets.SPOTIPY_CLIENT_ID }}
           SPOTIPY_CLIENT_SECRET: ${{ secrets.SPOTIPY_CLIENT_SECRET }}
