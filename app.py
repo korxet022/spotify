@@ -58,7 +58,7 @@ def formatear_tiempo_total(ms):
 
 # --- TÍTULO Y CABECERA ---
 st.title("🎵 Mi Dashboard de Spotify")
-st.markdown("Visualización en tiempo real de tu historial de reproducciones conectado con Supabase.")
+st.markdown("Visualización avanzada en tiempo real de tu historial musical.")
 
 if df.empty:
     st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización o lanza el script manual.")
@@ -68,7 +68,6 @@ else:
     # ==========================================
     st.sidebar.header("🔍 Filtros Avanzados")
     
-    # 1. Calendario
     min_date = df['played_at'].min().date()
     max_date = df['played_at'].max().date()
     
@@ -86,23 +85,13 @@ else:
     else:
         df_filtered = df
 
-    # 2. Multiselect de Artistas
     artistas_disponibles = sorted(df_filtered['artist_name'].dropna().unique())
-    artistas_seleccionados = st.sidebar.multiselect(
-        "🎤 Filtrar por Artistas", 
-        artistas_disponibles
-    )
-
+    artistas_seleccionados = st.sidebar.multiselect("🎤 Filtrar por Artistas", artistas_disponibles)
     if artistas_seleccionados:
         df_filtered = df_filtered[df_filtered['artist_name'].isin(artistas_seleccionados)]
 
-    # 3. Multiselect de Canciones
     canciones_disponibles = sorted(df_filtered['track_name'].dropna().unique())
-    canciones_seleccionadas = st.sidebar.multiselect(
-        "🎶 Filtrar por Canciones", 
-        canciones_disponibles
-    )
-
+    canciones_seleccionadas = st.sidebar.multiselect("🎶 Filtrar por Canciones", canciones_disponibles)
     if canciones_seleccionadas:
         df_filtered = df_filtered[df_filtered['track_name'].isin(canciones_seleccionadas)]
 
@@ -118,56 +107,119 @@ else:
     artistas_unicos = df_filtered['artist_name'].nunique()
     canciones_unicas = df_filtered['track_name'].nunique()
 
+    # Promedio diario
+    if not df_filtered.empty:
+        dias_unicos = df_filtered['played_at'].dt.date.nunique()
+        dias_unicos = max(dias_unicos, 1)
+        promedio_diario_reps = round(total_reproducciones / dias_unicos, 1)
+    else:
+        promedio_diario_reps = 0
+
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("🎧 Reproducciones", total_reproducciones)
     col2.metric("⏱️ Tiempo Escuchado", tiempo_escuchado_formateado)
-    col3.metric("🎤 Artistas Únicos", artistas_unicos)
-    col4.metric("🎶 Canciones Únicas", canciones_unicas)
+    col3.metric("📈 Promedio Diario", f"{promedio_diario_reps} reps/día")
+    col4.metric("🎤 Artistas / 🎶 Canciones", f"{artistas_unicos} / {canciones_unicas}")
 
     st.markdown("---")
 
     # ==========================================
-    # --- SECCIÓN DE GRÁFICOS CON PESTAÑAS ---
+    # --- TARJETAS DE DESTACADOS ---
+    # ==========================================
+    if not df_filtered.empty:
+        top_artista_val = df_filtered['artist_name'].mode()
+        top_artista_str = top_artista_val.iloc[0] if not top_artista_val.empty else "N/A"
+        
+        def obtener_franja(h):
+            if 6 <= h < 12: return "🌅 Mañana (06:00 - 12:00)"
+            elif 12 <= h < 20: return "☀️ Tarde (12:00 - 20:00)"
+            elif 20 <= h < 24: return "🌙 Noche (20:00 - 00:00)"
+            else: return "🌌 Madrugada (00:00 - 06:00)"
+        
+        franjas = df_filtered['played_at'].dt.hour.apply(obtener_franja)
+        top_franja = franjas.mode()
+        top_franja_str = top_franja.iloc[0] if not top_franja.empty else "N/A"
+
+        kpi_col1, kpi_col2 = st.columns(2)
+        kpi_col1.info(f"👑 **Artista Top del Periodo:** {top_artista_str}")
+        kpi_col2.info(f"⏰ **Momento Favorito:** {top_franja_str}")
+
+    st.markdown("---")
+
+    # ==========================================
+    # --- SECCIÓN DE GRÁFICOS (TOP ARTISTAS Y CANCIONES) ---
     # ==========================================
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
         st.subheader("🔥 Artistas Más Reproducidos")
-        
         top_artistas = df_filtered['artist_name'].value_counts().head(10)
         top_artistas_df = top_artistas.reset_index()
         top_artistas_df.columns = ['Artista', 'Reproducciones']
 
-        # Pestañas para elegir entre Gráfico (por defecto) o Lista
         tab_grafico_a, tab_lista_a = st.tabs(["📊 Gráfico", "📋 Ver Lista"])
-        
         with tab_grafico_a:
             if not top_artistas.empty:
                 st.bar_chart(top_artistas)
             else:
                 st.info("No hay datos para esta selección.")
-                
         with tab_lista_a:
             st.dataframe(top_artistas_df, use_container_width=True, hide_index=True)
 
     with col_g2:
         st.subheader("🎵 Canciones Más Reproducidas")
-        
         top_canciones = df_filtered['track_name'].value_counts().head(10)
         top_canciones_df = top_canciones.reset_index()
         top_canciones_df.columns = ['Canción', 'Reproducciones']
 
-        # Pestañas para elegir entre Gráfico (por defecto) o Lista
         tab_grafico_c, tab_lista_c = st.tabs(["📊 Gráfico", "📋 Ver Lista"])
-        
         with tab_grafico_c:
             if not top_canciones.empty:
                 st.bar_chart(top_canciones)
             else:
                 st.info("No hay datos para esta selección.")
-                
         with tab_lista_c:
             st.dataframe(top_canciones_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ==========================================
+    # --- NUEVOS GRÁFICOS ANALÍTICOS ---
+    # ==========================================
+    st.subheader("📈 Evolución Diaria de Reproducciones")
+    df_diario = df_filtered.copy()
+    if not df_diario.empty:
+        df_diario['dia'] = df_diario['played_at'].dt.date
+        conteo_diario = df_diario['dia'].value_counts().sort_index()
+        st.line_chart(conteo_diario)
+    else:
+        st.info("No hay datos para mostrar la evolución temporal.")
+
+    st.markdown("---")
+
+    col_h1, col_h2 = st.columns(2)
+
+    with col_h1:
+        st.subheader("⏰ Hábitos por Hora del Día")
+        if not df_filtered.empty:
+            df_filtered_h = df_filtered.copy()
+            df_filtered_h['hora'] = df_filtered_h['played_at'].dt.hour
+            conteo_horas = df_filtered_h['hora'].value_counts().reindex(range(24), fill_value=0)
+            st.bar_chart(conteo_horas)
+        else:
+            st.info("No hay datos.")
+
+    with col_h2:
+        st.subheader("📅 Distribución por Día de la Semana")
+        if not df_filtered.empty:
+            df_filtered_d = df_filtered.copy()
+            dias_orden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+            dias_map = {0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
+            df_filtered_d['dia_semana'] = df_filtered_d['played_at'].dt.dayofweek.map(dias_map)
+            conteo_dias = df_filtered_d['dia_semana'].value_counts().reindex(dias_orden, fill_value=0)
+            st.bar_chart(conteo_dias)
+        else:
+            st.info("No hay datos.")
 
     st.markdown("---")
 
