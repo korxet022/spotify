@@ -19,7 +19,7 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- CARGAR DATOS ---
+# --- CARGAR DATOS Y CONVERTIR A HORA DE ESPAÑA ---
 @st.cache_data(ttl=60)
 def cargar_datos():
     response = supabase.table("spotify_history").select("*").order("played_at", desc=True).execute()
@@ -27,7 +27,13 @@ def cargar_datos():
     if not data:
         return pd.DataFrame()
     df = pd.DataFrame(data)
+    
+    # 1. Convertir a datetime manteniendo UTC y luego transformarlo a la hora de España (Europe/Madrid)
     df['played_at'] = pd.to_datetime(df['played_at'])
+    if df['played_at'].dt.tz is None:
+        df['played_at'] = df['played_at'].dt.tz_localize('UTC')
+    df['played_at'] = df['played_at'].dt.tz_convert('Europe/Madrid')
+    
     return df
 
 df = cargar_datos()
@@ -57,7 +63,8 @@ def formatear_tiempo_total(ms):
         return f"{segundos}s"
 
 # --- TÍTULO Y CABECERA ---
-st.title("🎵 Dashboard de Spotify")
+st.title("🎵 Mi Dashboard de Spotify")
+st.markdown("Visualización avanzada en tiempo real de tu historial musical (Hora de España).")
 
 if df.empty:
     st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización o lanza el script manual.")
@@ -260,12 +267,15 @@ else:
     df_display = df_filtered.copy()
     df_display['Duración'] = df_display['duration_ms'].apply(formatear_duracion)
     
+    # Al mostrar la fecha en la tabla, eliminamos la zona horaria visualmente para que quede limpia (YYYY-MM-DD HH:MM:SS)
+    df_display['played_at_str'] = df_display['played_at'].dt.strftime('%Y-%m-%d %H:%M:%S')
+
     st.dataframe(
-        df_display[['played_at', 'track_name', 'artist_name', 'album_name', 'Duración']],
+        df_display[['played_at_str', 'track_name', 'artist_name', 'album_name', 'Duración']],
         use_container_width=True,
         hide_index=True,
         column_config={
-            "played_at": "Fecha y Hora",
+            "played_at_str": "Fecha y Hora (España)",
             "track_name": "Canción",
             "artist_name": "Artista",
             "album_name": "Álbum",
