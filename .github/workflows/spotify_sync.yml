@@ -1,35 +1,33 @@
 name: Sincronizar Spotify con Supabase
 
 on:
-  schedule:
-    - cron: '0 * * * *' # Se ejecuta automáticamente cada hora en punto
-  workflow_dispatch: # Permite lanzarlo manualmente cuando quieras desde la web de GitHub
+  repository_dispatch:
+    types: [sincronizar_spotify]
+  workflow_dispatch: # Mantiene el botón manual por si quieres probarlo
 
 jobs:
-  sincronizar:
+  sync:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout del código
+      - name: Checkout del repositorio
         uses: actions/checkout@v4
-
+      
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
-      - name: Instalar librerías
+          
+      - name: Instalar dependencias
         run: |
-          pip install spotipy supabase
-
-      - name: Restaurar archivo .cache de Spotify desde los secretos
-        run: |
-          echo '${{ secrets.SPOTIPY_CACHE }}' > .cache
-
-      - name: Ejecutar script de sincronización
+          pip install spotipy pandas supabase pylast
+          
+      - name: Ejecutar script
         env:
           SPOTIPY_CLIENT_ID: ${{ secrets.SPOTIPY_CLIENT_ID }}
           SPOTIPY_CLIENT_SECRET: ${{ secrets.SPOTIPY_CLIENT_SECRET }}
-          SPOTIPY_REDIRECT_URI: ${{ secrets.SPOTIPY_REDIRECT_URI }}
+          SPOTIPY_REFRESH_TOKEN: ${{ secrets.SPOTIPY_REFRESH_TOKEN }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
         run: python spoty.py
