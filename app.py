@@ -32,6 +32,30 @@ def cargar_datos():
 
 df = cargar_datos()
 
+# --- FUNCIONES AUXILIARES DE FORMATO DE TIEMPO ---
+def formatear_duracion(ms):
+    if pd.isna(ms) or ms == 0:
+        return "0:00"
+    segundos_totales = int(ms / 1000)
+    minutos = segundos_totales // 60
+    segundos = segundos_totales % 60
+    return f"{minutos}:{segundos:02d}"
+
+def formatear_tiempo_total(ms):
+    if pd.isna(ms) or ms == 0:
+        return "0 min"
+    segundos_totales = int(ms / 1000)
+    horas = segundos_totales // 3600
+    minutos = (segundos_totales % 3600) // 60
+    segundos = segundos_totales % 60
+    
+    if horas > 0:
+        return f"{horas}h {minutos}m {segundos}s"
+    elif minutos > 0:
+        return f"{minutos}m {segundos}s"
+    else:
+        return f"{segundos}s"
+
 # --- TÍTULO Y CABECERA ---
 st.title("🎵 Mi Dashboard de Spotify")
 st.markdown("Visualización en tiempo real de tu historial de reproducciones conectado con Supabase.")
@@ -40,11 +64,11 @@ if df.empty:
     st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización o lanza el script manual.")
 else:
     # ==========================================
-    # --- BARRA LATERAL: FILTROS INTERACTIVOS ---
+    # --- BARRA LATERAL: FILTROS MULTIPLES ---
     # ==========================================
-    st.sidebar.header("🔍 Filtros Interactivos")
+    st.sidebar.header("🔍 Filtros Avanzados")
     
-    # 1. Filtro de Calendario
+    # 1. Calendario
     min_date = df['played_at'].min().date()
     max_date = df['played_at'].max().date()
     
@@ -55,7 +79,6 @@ else:
         max_value=max_date
     )
 
-    # Aplicar filtro de fecha
     if isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range
         mask = (df['played_at'].dt.date >= start_date) & (df['played_at'].dt.date <= end_date)
@@ -63,27 +86,26 @@ else:
     else:
         df_filtered = df
 
-    # 2. Filtro por Artista Específico
+    # 2. Multiselect de Artistas
     artistas_disponibles = sorted(df_filtered['artist_name'].dropna().unique())
-    artista_seleccionado = st.sidebar.selectbox(
-        "🎤 Filtrar por Artista", 
-        ["Todos los artistas"] + list(artistas_disponibles)
+    artistas_seleccionados = st.sidebar.multiselect(
+        "🎤 Filtrar por Artistas", 
+        artistas_disponibles
     )
 
-    if artista_seleccionado != "Todos los artistas":
-        df_filtered = df_filtered[df_filtered['artist_name'] == artista_seleccionado]
+    if artistas_seleccionados:
+        df_filtered = df_filtered[df_filtered['artist_name'].isin(artistas_seleccionados)]
 
-    # 3. Filtro por Canción Específica (se adapta al artista si se seleccionó uno)
+    # 3. Multiselect de Canciones
     canciones_disponibles = sorted(df_filtered['track_name'].dropna().unique())
-    cancion_seleccionada = st.sidebar.selectbox(
-        "🎶 Filtrar por Canción", 
-        ["Todas las canciones"] + list(canciones_disponibles)
+    canciones_seleccionadas = st.sidebar.multiselect(
+        "🎶 Filtrar por Canciones", 
+        canciones_disponibles
     )
 
-    if cancion_seleccionada != "Todas las canciones":
-        df_filtered = df_filtered[df_filtered['track_name'] == cancion_seleccionada]
+    if canciones_seleccionadas:
+        df_filtered = df_filtered[df_filtered['track_name'].isin(canciones_seleccionadas)]
 
-    # Botón para limpiar filtros fácilmente
     if st.sidebar.button("🔄 Restablecer Filtros"):
         st.rerun()
 
@@ -92,38 +114,66 @@ else:
     # ==========================================
     total_reproducciones = len(df_filtered)
     total_ms = df_filtered['duration_ms'].sum() if 'duration_ms' in df_filtered.columns else 0
-    total_minutos = int(total_ms / 60000)
+    tiempo_escuchado_formateado = formatear_tiempo_total(total_ms)
     artistas_unicos = df_filtered['artist_name'].nunique()
     canciones_unicas = df_filtered['track_name'].nunique()
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("🎧 Reproducciones", total_reproducciones)
-    col2.metric("⏱️ Tiempo Escuchado", f"{total_minutos} min")
+    col2.metric("⏱️ Tiempo Escuchado", tiempo_escuchado_formateado)
     col3.metric("🎤 Artistas Únicos", artistas_unicos)
     col4.metric("🎶 Canciones Únicas", canciones_unicas)
 
     st.markdown("---")
 
     # ==========================================
-    # --- SECCIÓN DE GRÁFICOS / RESÚMENES ---
+    # --- RANKINGS INTERACTIVOS (CLICABLES) ---
     # ==========================================
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
         st.subheader("🔥 Artistas Más Reproducidos")
-        top_artistas = df_filtered['artist_name'].value_counts().head(10)
-        if not top_artistas.empty:
-            st.bar_chart(top_artistas)
-        else:
-            st.info("No hay datos para esta selección.")
+        st.caption("💡 Haz clic en las filas de la tabla para filtrar automáticamente.")
+        
+        top_artistas_df = df_filtered['artist_name'].value_counts().reset_index()
+        top_artistas_df.columns = ['Artista', 'Reproducciones']
+        
+        # Tabla interactiva con selección activada
+        evento_artista = st.dataframe(
+            top_artistas_df.head(10),
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="multi-row"
+        )
+        
+        # Si el usuario hace clic en filas de artistas, filtramos por ellos automáticamente
+        if evento_artista and evento_artista.selection.rows:
+            seleccionados_indices = evento_artista.selection.rows
+            artistas_clicados = top_artistas_df.iloc[seleccionados_indices]['Artista'].tolist()
+            df_filtered = df_filtered[df_filtered['artist_name'].isin(artistas_clicados)]
 
     with col_g2:
         st.subheader("🎵 Canciones Más Reproducidas")
-        top_canciones = df_filtered['track_name'].value_counts().head(10)
-        if not top_canciones.empty:
-            st.bar_chart(top_canciones)
-        else:
-            st.info("No hay datos para esta selección.")
+        st.caption("💡 Haz clic en las filas de la tabla para filtrar automáticamente.")
+        
+        top_canciones_df = df_filtered['track_name'].value_counts().reset_index()
+        top_canciones_df.columns = ['Canción', 'Reproducciones']
+        
+        # Tabla interactiva con selección activada
+        evento_cancion = st.dataframe(
+            top_canciones_df.head(10),
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="multi-row"
+        )
+        
+        # Si el usuario hace clic en canciones, filtramos por ellas
+        if evento_cancion and evento_cancion.selection.rows:
+            seleccionados_indices_c = evento_cancion.selection.rows
+            canciones_clicadas = top_canciones_df.iloc[seleccionados_indices_c]['Canción'].tolist()
+            df_filtered = df_filtered[df_filtered['track_name'].isin(canciones_clicadas)]
 
     st.markdown("---")
 
@@ -131,7 +181,20 @@ else:
     # --- TABLA DE HISTORIAL DETALLADO ---
     # ==========================================
     st.subheader(f"📜 Historial Detallado ({len(df_filtered)} registros)")
+    
+    # Preparar dataframe limpio sin URL y con duración formateada en min:seg
+    df_display = df_filtered.copy()
+    df_display['Duración'] = df_display['duration_ms'].apply(formatear_duracion)
+    
     st.dataframe(
-        df_filtered[['played_at', 'track_name', 'artist_name', 'album_name', 'external_url']],
-        use_container_width=True
+        df_display[['played_at', 'track_name', 'artist_name', 'album_name', 'Duración']],
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "played_at": "Fecha y Hora",
+            "track_name": "Canción",
+            "artist_name": "Artista",
+            "album_name": "Álbum",
+            "Duración": "Duración"
+        }
     )
