@@ -32,42 +32,79 @@ def cargar_datos():
 
 df = cargar_datos()
 
-# --- TÍTULO Y MÉTRICAS ---
+# --- TÍTULO Y CABECERA ---
 st.title("🎵 Mi Dashboard de Spotify")
 st.markdown("Visualización en tiempo real de tu historial de reproducciones conectado con Supabase.")
 
 if df.empty:
-    st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización olanza el script manual.")
+    st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización o lanza el script manual.")
 else:
-    total_reproducciones = len(df)
-    artistas_unicos = df['artist_name'].nunique()
-    canciones_unicas = df['track_name'].nunique()
+    # --- BARRA LATERAL: FILTRO DE CALENDARIO ---
+    st.sidebar.header("🔍 Filtros de Fecha")
+    
+    # Obtener fechas mínimo y máximo del historial para los límites del calendario
+    min_date = df['played_at'].min().date()
+    max_date = df['played_at'].max().date()
+    
+    # Selector de rango de fechas en la barra lateral
+    date_range = st.sidebar.date_input(
+        "Selecciona el periodo",
+        value=(min_date, max_date),
+        min_value=min_date,
+        max_value=max_date
+    )
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("🎧 Total Reproducciones", total_reproducciones)
-    col2.metric("🎤 Artistas Únicos", artistas_unicos)
-    col3.metric("🎶 Canciones Únicas", canciones_unicas)
+    # Filtrar el DataFrame según el rango de fechas seleccionado
+    if isinstance(date_range, tuple) and len(date_range) == 2:
+        start_date, end_date = date_range
+        mask = (df['played_at'].dt.date >= start_date) & (df['played_at'].dt.date <= end_date)
+        df_filtered = df.loc[mask]
+    else:
+        df_filtered = df
+
+    # --- MÉTRICAS Y KPIS PRINCIPALES ---
+    total_reproducciones = len(df_filtered)
+    
+    # Cálculo de tiempo escuchado en minutos (duración_ms / 60,000)
+    total_ms = df_filtered['duration_ms'].sum() if 'duration_ms' in df_filtered.columns else 0
+    total_minutos = int(total_ms / 60000)
+    
+    artistas_unicos = df_filtered['artist_name'].nunique()
+    canciones_unicas = df_filtered['track_name'].nunique()
+
+    # Mostramos 4 tarjetas de KPI distribuidas en columnas
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("🎧 Reproducciones", total_reproducciones)
+    col2.metric("⏱️ Tiempo Escuchado", f"{total_minutos} min")
+    col3.metric("🎤 Artistas Únicos", artistas_unicos)
+    col4.metric("🎶 Canciones Únicas", canciones_unicas)
 
     st.markdown("---")
 
-    # --- GRÁFICOS ---
+    # --- SECCIÓN DE GRÁFICOS (Basados en los datos filtrados) ---
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
         st.subheader("🔥 Artistas Más Reproducidos")
-        top_artistas = df['artist_name'].value_counts().head(10)
-        st.bar_chart(top_artistas)
+        top_artistas = df_filtered['artist_name'].value_counts().head(10)
+        if not top_artistas.empty:
+            st.bar_chart(top_artistas)
+        else:
+            st.info("No hay datos para este rango de fechas.")
 
     with col_g2:
         st.subheader("🎵 Canciones Más Reproducidas")
-        top_canciones = df['track_name'].value_counts().head(10)
-        st.bar_chart(top_canciones)
+        top_canciones = df_filtered['track_name'].value_counts().head(10)
+        if not top_canciones.empty:
+            st.bar_chart(top_canciones)
+        else:
+            st.info("No hay datos para este rango de fechas.")
 
     st.markdown("---")
 
-    # --- TABLA DETALLADA ---
+    # --- TABLA DE HISTORIAL DETALLADO ---
     st.subheader("📜 Historial Detallado")
     st.dataframe(
-        df[['played_at', 'track_name', 'artist_name', 'album_name', 'external_url']],
+        df_filtered[['played_at', 'track_name', 'artist_name', 'album_name', 'external_url']],
         use_container_width=True
     )
