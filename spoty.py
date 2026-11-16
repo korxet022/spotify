@@ -1,5 +1,5 @@
-
 import os
+import time
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from supabase import create_client, Client
@@ -11,7 +11,7 @@ SPOTIPY_REDIRECT_URI = os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8080"
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-# Inicializar clientes
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 scope = "user-read-recently-played"
@@ -35,9 +35,11 @@ def obtener_genero_seguro(artist_id):
         genres = artist_info.get('genres', [])
         genre_str = ", ".join(genres) if genres else "Desconocido"
         artist_genres_cache[artist_id] = genre_str
+        
+        # Pausa de cortesía para evitar ráfagas prohibidas por Spotify
+        time.sleep(0.2) 
         return genre_str
     except Exception:
-        # Si Spotify bloquea la consulta de artista por restricciones de la API, devolvemos Desconocido sin romper el script
         artist_genres_cache[artist_id] = "Desconocido"
         return "Desconocido"
 
@@ -69,14 +71,11 @@ def sincronizar_canciones():
         duration_ms = track.get('duration_ms', 0)
         device_name = item.get('device', {}).get('name', 'Desconocido')
         
-        # La popularidad viene directamente en el objeto de la pista
-        
-        # A veces la API de historial reciente deja la popularidad a nivel de track vacía, 
-# la buscamos en el álbum si existe, o asignamos un número por defecto si la pista es comercial
         popularity = track.get('popularity')
         if not popularity or popularity == 0:
-            popularity = track.get('album', {}).get('popularity', 50) # Valor orientativo por defecto
-        # Intentar obtener género de forma segura
+            popularity = track.get('album', {}).get('popularity', 50)
+
+        # Solo consulta si el artista no está ya en caché (y con el time.sleep evitamos el baneo)
         genre = obtener_genero_seguro(artist_id)
 
         fila = {
@@ -94,7 +93,7 @@ def sincronizar_canciones():
         try:
             supabase.table("spotify_history").upsert(fila, on_conflict="played_at").execute()
             guardadas += 1
-            print(f"✅ Guardada: {track_name} | Artista: {artist_name} | Pop: {popularity} | Género: {genre}")
+            print(f"✅ Guardada: {track_name} | Artista: {artist_name} | Género: {genre}")
         except Exception as e:
             print(f"❌ Error al guardar en Supabase '{track_name}': {e}")
 
