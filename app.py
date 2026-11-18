@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import altair as alt
 from supabase import create_client, Client
 
 # --- CONFIGURACIÓN DE LA PÁGINA ---
@@ -183,39 +184,45 @@ else:
     st.markdown("---")
 
     # ==========================================
-    # --- SECCIÓN DE GRÁFICOS (TOP ARTISTAS Y CANCIONES ORDENADOS) ---
+    # --- SECCIÓN DE GRÁFICOS (TOP ORDENADOS CON ALTAIR) ---
     # ==========================================
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
         st.subheader("🔥 Artistas Más Reproducidos")
-        top_artistas = df_filtered['artist_name'].value_counts().sort_values(ascending=False).head(10)
-        top_artistas_df = top_artistas.reset_index()
-        top_artistas_df.columns = ['Artista', 'Reproducciones']
+        top_artistas = df_filtered['artist_name'].value_counts().head(10).reset_index()
+        top_artistas.columns = ['Artista', 'Reproducciones']
 
         tab_grafico_a, tab_lista_a = st.tabs(["📊 Gráfico", "📋 Ver Lista"])
         with tab_grafico_a:
             if not top_artistas.empty:
-                st.bar_chart(top_artistas)
+                chart_a = alt.Chart(top_artistas).mark_bar().encode(
+                    x=alt.X('Artista:N', sort=None, title='Artista'),
+                    y=alt.Y('Reproducciones:Q', title='Reproducciones')
+                ).properties(height=350)
+                st.altair_chart(chart_a, use_container_width=True)
             else:
                 st.info("No hay datos para esta selección.")
         with tab_lista_a:
-            st.dataframe(top_artistas_df, use_container_width=True, hide_index=True)
+            st.dataframe(top_artistas, use_container_width=True, hide_index=True)
 
     with col_g2:
         st.subheader("🎵 Canciones Más Reproducidas")
-        top_canciones = df_filtered['track_name'].value_counts().sort_values(ascending=False).head(10)
-        top_canciones_df = top_canciones.reset_index()
-        top_canciones_df.columns = ['Canción', 'Reproducciones']
+        top_canciones = df_filtered['track_name'].value_counts().head(10).reset_index()
+        top_canciones.columns = ['Canción', 'Reproducciones']
 
         tab_grafico_c, tab_lista_c = st.tabs(["📊 Gráfico", "📋 Ver Lista"])
         with tab_grafico_c:
             if not top_canciones.empty:
-                st.bar_chart(top_canciones)
+                chart_c = alt.Chart(top_canciones).mark_bar().encode(
+                    x=alt.X('Canción:N', sort=None, title='Canción'),
+                    y=alt.Y('Reproducciones:Q', title='Reproducciones')
+                ).properties(height=350)
+                st.altair_chart(chart_c, use_container_width=True)
             else:
                 st.info("No hay datos para esta selección.")
         with tab_lista_c:
-            st.dataframe(top_canciones_df, use_container_width=True, hide_index=True)
+            st.dataframe(top_canciones, use_container_width=True, hide_index=True)
 
     st.markdown("---")
 
@@ -246,7 +253,7 @@ else:
             st.info("No hay datos.")
 
     with col_h2:
-        st.subheader("📅 Distribución por Día de la Semana (Ordenado)")
+        st.subheader("📅 Distribución por Día de la Semana")
         if not df_filtered.empty:
             df_filtered_d = df_filtered.copy()
             dias_orden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
