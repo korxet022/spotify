@@ -1,5 +1,4 @@
 import os
-import time
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from supabase import create_client, Client
@@ -21,27 +20,6 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
     redirect_uri=SPOTIPY_REDIRECT_URI,
     scope=scope
 ))
-
-artist_genres_cache = {}
-
-def obtener_genero_seguro(artist_id):
-    if not artist_id:
-        return "Desconocido"
-    if artist_id in artist_genres_cache:
-        return artist_genres_cache[artist_id]
-    
-    try:
-        artist_info = sp.artist(artist_id)
-        genres = artist_info.get('genres', [])
-        genre_str = ", ".join(genres) if genres else "Desconocido"
-        artist_genres_cache[artist_id] = genre_str
-        
-        # Pausa de cortesía para evitar ráfagas prohibidas por Spotify
-        time.sleep(0.2) 
-        return genre_str
-    except Exception:
-        artist_genres_cache[artist_id] = "Desconocido"
-        return "Desconocido"
 
 def sincronizar_canciones():
     print("Buscando canciones recientes en Spotify...")
@@ -65,7 +43,6 @@ def sincronizar_canciones():
         
         artist_obj = track['artists'][0] if track.get('artists') else {}
         artist_name = artist_obj.get('name', 'Desconocido')
-        artist_id = artist_obj.get('id', None)
         
         album_name = track.get('album', {}).get('name', 'Desconocido')
         duration_ms = track.get('duration_ms', 0)
@@ -75,9 +52,6 @@ def sincronizar_canciones():
         if not popularity or popularity == 0:
             popularity = track.get('album', {}).get('popularity', 50)
 
-        # Solo consulta si el artista no está ya en caché (y con el time.sleep evitamos el baneo)
-        genre = obtener_genero_seguro(artist_id)
-
         fila = {
             "played_at": played_at_str,
             "track_name": track_name,
@@ -86,14 +60,14 @@ def sincronizar_canciones():
             "duration_ms": duration_ms,
             "device_name": device_name,
             "popularity": popularity,
-            "genre": genre,
+            "genre": "Desconocido", # Se asigna por defecto sin consumir la API
             "external_url": track.get('external_urls', {}).get('spotify', '')
         }
 
         try:
             supabase.table("spotify_history").upsert(fila, on_conflict="played_at").execute()
             guardadas += 1
-            print(f"✅ Guardada: {track_name} | Artista: {artist_name} | Género: {genre}")
+            print(f"✅ Guardada: {track_name} | Artista: {artist_name}")
         except Exception as e:
             print(f"❌ Error al guardar en Supabase '{track_name}': {e}")
 
