@@ -23,6 +23,7 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(
 
 def sincronizar_canciones():
     print("Buscando canciones recientes en Spotify...")
+    # ÚNICA LLAMADA A LA API DE SPOTIFY (Trae hasta 50 canciones de golpe)
     resultados = sp.current_user_recently_played(limit=50)
     
     items = resultados.get('items', [])
@@ -52,6 +53,7 @@ def sincronizar_canciones():
         if not popularity or popularity == 0:
             popularity = track.get('album', {}).get('popularity', 50)
 
+        # Preparamos la fila usando exclusivamente los datos devueltos en la única petición inicial
         fila = {
             "played_at": played_at_str,
             "track_name": track_name,
@@ -60,11 +62,12 @@ def sincronizar_canciones():
             "duration_ms": duration_ms,
             "device_name": device_name,
             "popularity": popularity,
-            "genre": "Desconocido", # Se asigna por defecto sin consumir la API
+            "genre": "Desconocido", # Evitamos peticiones extra de géneros que saturaban la API
             "external_url": track.get('external_urls', {}).get('spotify', '')
         }
 
         try:
+            # Upsert a Supabase usando played_at como clave única para evitar duplicados
             supabase.table("spotify_history").upsert(fila, on_conflict="played_at").execute()
             guardadas += 1
             print(f"✅ Guardada: {track_name} | Artista: {artist_name}")
