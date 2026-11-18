@@ -183,13 +183,13 @@ else:
     st.markdown("---")
 
     # ==========================================
-    # --- SECCIÓN DE GRÁFICOS (TOP ARTISTAS Y CANCIONES) ---
+    # --- SECCIÓN DE GRÁFICOS (TOP ARTISTAS Y CANCIONES ORDENADOS) ---
     # ==========================================
     col_g1, col_g2 = st.columns(2)
 
     with col_g1:
         st.subheader("🔥 Artistas Más Reproducidos")
-        top_artistas = df_filtered['artist_name'].value_counts().head(10)
+        top_artistas = df_filtered['artist_name'].value_counts().sort_values(ascending=False).head(10)
         top_artistas_df = top_artistas.reset_index()
         top_artistas_df.columns = ['Artista', 'Reproducciones']
 
@@ -204,7 +204,7 @@ else:
 
     with col_g2:
         st.subheader("🎵 Canciones Más Reproducidas")
-        top_canciones = df_filtered['track_name'].value_counts().head(10)
+        top_canciones = df_filtered['track_name'].value_counts().sort_values(ascending=False).head(10)
         top_canciones_df = top_canciones.reset_index()
         top_canciones_df.columns = ['Canción', 'Reproducciones']
 
@@ -246,13 +246,16 @@ else:
             st.info("No hay datos.")
 
     with col_h2:
-        st.subheader("📅 Distribución por Día de la Semana")
+        st.subheader("📅 Distribución por Día de la Semana (Ordenado)")
         if not df_filtered.empty:
             df_filtered_d = df_filtered.copy()
             dias_orden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
             dias_map = {0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
+            
             df_filtered_d['dia_semana'] = df_filtered_d['played_at'].dt.dayofweek.map(dias_map)
-            conteo_dias = df_filtered_d['dia_semana'].value_counts().reindex(dias_orden, fill_value=0)
+            df_filtered_d['dia_semana'] = pd.Categorical(df_filtered_d['dia_semana'], categories=dias_orden, ordered=True)
+            
+            conteo_dias = df_filtered_d['dia_semana'].value_counts().sort_index()
             st.bar_chart(conteo_dias)
         else:
             st.info("No hay datos.")
@@ -266,8 +269,6 @@ else:
     
     df_display = df_filtered.copy()
     df_display['Duración'] = df_display['duration_ms'].apply(formatear_duracion)
-    
-    # Al mostrar la fecha en la tabla, eliminamos la zona horaria visualmente para que quede limpia (YYYY-MM-DD HH:MM:SS)
     df_display['played_at_str'] = df_display['played_at'].dt.strftime('%Y-%m-%d %H:%M:%S')
 
     st.dataframe(
