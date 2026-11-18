@@ -20,7 +20,7 @@ def init_supabase():
 
 supabase = init_supabase()
 
-# --- CARGAR DATOS Y CONVERTIR A HORA DE ESPAÑA ---
+# --- CARGAR DATOS Y CONVERTIR A HORA DE ESPAÑA (ROBUSTO) ---
 @st.cache_data(ttl=60)
 def cargar_datos():
     response = supabase.table("spotify_history").select("*").order("played_at", desc=True).execute()
@@ -29,10 +29,19 @@ def cargar_datos():
         return pd.DataFrame()
     df = pd.DataFrame(data)
     
-    # 1. Convertir a datetime manteniendo UTC y luego transformarlo a la hora de España (Europe/Madrid)
-    df['played_at'] = pd.to_datetime(df['played_at'])
-    if df['played_at'].dt.tz is None:
-        df['played_at'] = df['played_at'].dt.tz_localize('UTC')
+    if 'played_at' not in df.columns or df['played_at'].empty:
+        return pd.DataFrame()
+
+    # Usamos format='mixed' y utc=True para manejar perfectamente los milisegundos variables de Supabase
+    df['played_at'] = pd.to_datetime(df['played_at'], format='mixed', utc=True, errors='coerce')
+    
+    # Descartar filas con fechas corruptas o nulas
+    df = df.dropna(subset=['played_at'])
+    
+    if df.empty:
+        return pd.DataFrame()
+
+    # Convertir a la hora de España (Europe/Madrid)
     df['played_at'] = df['played_at'].dt.tz_convert('Europe/Madrid')
     
     return df
@@ -68,7 +77,7 @@ st.title("🎵 Mi Dashboard de Spotify")
 st.markdown("Visualización avanzada en tiempo real de tu historial musical (Hora de España).")
 
 if df.empty:
-    st.warning("⚠️ No hay datos todavía. Espera a que se ejecute la sincronización o lanza el script manual.")
+    st.warning("⚠️ No hay datos todavía o ha habido un problema al cargarlos. Espera a que se ejecute la sincronización.")
 else:
     min_date = df['played_at'].min().date()
     max_date = df['played_at'].max().date()
@@ -88,7 +97,6 @@ else:
     # ==========================================
     st.sidebar.header("🔍 Filtros Avanzados")
     
-    # Botón de restablecer filtros funcional
     if st.sidebar.button("🔄 Restablecer Filtros"):
         st.session_state.date_range = (min_date, max_date)
         st.session_state.artistas_seleccionados = []
@@ -102,7 +110,6 @@ else:
         key="date_range"
     )
 
-    # Las opciones de artistas se basan en el dataset global para no perder la selección al cambiar fechas
     artistas_disponibles = sorted(df['artist_name'].dropna().unique())
     artistas_seleccionados = st.sidebar.multiselect(
         "🎤 Filtrar por Artistas", 
@@ -110,7 +117,6 @@ else:
         key="artistas_seleccionados"
     )
 
-    # Filtrar canciones disponibles según los artistas elegidos (o todo el df)
     df_para_canciones = df[df['artist_name'].isin(artistas_seleccionados)] if artistas_seleccionados else df
     canciones_disponibles = sorted(df_para_canciones['track_name'].dropna().unique())
     
@@ -120,7 +126,7 @@ else:
         key="canciones_seleccionadas"
     )
 
-    # Aplicar todos los filtros de forma acumulativa sobre una copia del DataFrame
+    # Aplicar filtros de forma acumulativa
     df_filtered = df.copy()
 
     if isinstance(date_range, tuple) and len(date_range) == 2:
@@ -143,7 +149,6 @@ else:
     artistas_unicos = df_filtered['artist_name'].nunique()
     canciones_unicas = df_filtered['track_name'].nunique()
 
-    # Promedio diario basado en el rango total de fechas seleccionado
     if not df_filtered.empty and isinstance(date_range, tuple) and len(date_range) == 2:
         start_date, end_date = date_range
         dias_totales_rango = (end_date - start_date).days + 1
