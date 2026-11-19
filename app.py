@@ -1,297 +1,283 @@
-import streamlit as st
+import os
+from datetime import datetime, timedelta
 import pandas as pd
-import altair as alt
+import plotly.express as px
+import streamlit as st
 from supabase import create_client, Client
 
-# --- CONFIGURACIÓN DE LA PÁGINA ---
+# ==========================================
+# --- CONFIGURACIÓN DE PÁGINA Y SUPABASE ---
+# ==========================================
 st.set_page_config(
-    page_title="Spotify Analytics Dashboard",
-    page_icon="🎵",
-    layout="wide"
+    page_title="Spotify Analytics | Dashboard",
+    page_icon="🎧",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
-# --- CONFIGURACIÓN DE SUPABASE ---
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
 
-@st.cache_resource
-def init_supabase():
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+if not SUPABASE_URL or not SUPABASE_KEY:
+    st.error("⚠️ Faltan las credenciales de Supabase (`SUPABASE_URL` y `SUPABASE_KEY`).")
+    st.stop()
 
-supabase = init_supabase()
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# --- CARGAR DATOS Y CONVERTIR A HORA DE ESPAÑA (ROBUSTO) ---
+
+# ==========================================
+# --- FUNCIONES AUXILIARES ---
+# ==========================================
+def formatear_tiempo_total(ms):
+    if pd.isna(ms) or ms <= 0:
+        return "0m"
+    total_segundos = int(ms // 1000)
+    horas = total_segundos // 3600
+    minutos = (total_segundos % 3600) // 60
+    if horas > 0:
+        return f"{horas}h {minutos}m"
+    return f"{minutos}m"
+
+
 @st.cache_data(ttl=60)
 def cargar_datos():
-    response = supabase.table("spotify_history").select("*").order("played_at", desc=True).execute()
-    data = response.data
-    if not data:
-        return pd.DataFrame()
-    df = pd.DataFrame(data)
-    
-    if 'played_at' not in df.columns or df['played_at'].empty:
+    all_rows = []
+    batch_size = 1000
+    start = 0
+
+    while True:
+        response = (
+            supabase.table("spotify_history")
+            .select("*")
+            .order("played_at", desc=True)
+            .range(start, start + batch_size - 1)
+            .execute()
+        )
+        rows = response.data
+        if not rows:
+            break
+        all_rows.extend(rows)
+        if len(rows) < batch_size:
+            break
+        start += batch_size
+
+    if not all_rows:
         return pd.DataFrame()
 
-    # Usamos format='mixed' y utc=True para manejar perfectamente los milisegundos variables de Supabase
-    df['played_at'] = pd.to_datetime(df['played_at'], format='mixed', utc=True, errors='coerce')
-    
-    # Descartar filas con fechas corruptas o nulas
+    df = pd.DataFrame(all_rows)
+
+    # Conversión robusta de fechas (soporta distintos decimales de milisegundos en Supabase)
+    df['played_at'] = pd.to_datetime(
+        df['played_at'],
+        format='mixed',
+        utc=True,
+        errors='coerce'
+    )
     df = df.dropna(subset=['played_at'])
-    
-    if df.empty:
-        return pd.DataFrame()
 
-    # Convertir a la hora de España (Europe/Madrid)
-    df['played_at'] = df['played_at'].dt.tz_convert('Europe/Madrid')
-    
+    # Convertir a hora local de España
+    df['played_at_es'] = df['played_at'].dt.tz_convert('Europe/Madrid')
+    df['fecha'] = df['played_at_es'].dt.date
+    df['hora'] = df['played_at_es'].dt.hour
+    df['dia_semana_num'] = df['played_at_es'].dt.dayofweek
+
+    dias_map = {
+        0: 'Lun', 1: 'Mar', 2: 'Mié', 3: 'Jue',
+        4: 'Vie', 5: 'Sáb', 6: 'Dom'
+    }
+    df['dia_semana'] = df['dia_semana_num'].map(dias_map)
+
+    if 'duration_ms' in df.columns:
+        df['duration_ms'] = pd.to_numeric(df['duration_ms'], errors='coerce').fillna(0)
+        df['minutos'] = df['duration_ms'] / 60000.0
+    else:
+        df['duration_ms'] = 0
+        df['minutos'] = 0.0
+
     return df
+
+
+# ==========================================
+# --- CARGA DE DATOS Y BARRA LATERAL ---
+# ==========================================
+st.title("🎧 Mi Historial de Spotify")
+
+if st.sidebar.button("🔄 Actualizar datos"):
+    st.cache_data.clear()
+    st.rerun()
 
 df = cargar_datos()
 
-# --- FUNCIONES AUXILIARES DE FORMATO DE TIEMPO ---
-def formatear_duracion(ms):
-    if pd.isna(ms) or ms == 0:
-        return "0:00"
-    segundos_totales = int(ms / 1000)
-    minutos = segundos_totales // 60
-    segundos = segundos_totales % 60
-    return f"{minutos}:{segundos:02d}"
-
-def formatear_tiempo_total(ms):
-    if pd.isna(ms) or ms == 0:
-        return "0 min"
-    segundos_totales = int(ms / 1000)
-    horas = segundos_totales // 3600
-    minutos = (segundos_totales % 3600) // 60
-    segundos = segundos_totales % 60
-    
-    if horas > 0:
-        return f"{horas}h {minutos}m {segundos}s"
-    elif minutos > 0:
-        return f"{minutos}m {segundos}s"
-    else:
-        return f"{segundos}s"
-
-# --- TÍTULO Y CABECERA ---
-st.title("🎵 Mi Dashboard de Spotify")
-st.markdown("Visualización avanzada en tiempo real de tu historial musical (Hora de España).")
-
 if df.empty:
-    st.warning("⚠️ No hay datos todavía o ha habido un problema al cargarlos. Espera a que se ejecute la sincronización.")
+    st.warning("Aún no hay reproducciones registradas en la base de datos.")
+    st.stop()
+
+st.sidebar.header("🔍 Filtros")
+
+min_date = df['fecha'].min()
+max_date = df['fecha'].max()
+
+date_range = st.sidebar.date_input(
+    "Rango de fechas",
+    value=(min_date, max_date),
+    min_value=min_date,
+    max_value=max_date
+)
+
+if isinstance(date_range, tuple) and len(date_range) == 2:
+    start_date, end_date = date_range
+    df_filtered = df[(df['fecha'] >= start_date) & (df['fecha'] <= end_date)].copy()
 else:
-    min_date = df['played_at'].min().date()
-    max_date = df['played_at'].max().date()
-
-    # ==========================================
-    # --- INICIALIZACIÓN DE SESSION STATE ---
-    # ==========================================
-    if "date_range" not in st.session_state:
-        st.session_state.date_range = (min_date, max_date)
-    if "artistas_seleccionados" not in st.session_state:
-        st.session_state.artistas_seleccionados = []
-    if "canciones_seleccionadas" not in st.session_state:
-        st.session_state.canciones_seleccionadas = []
-
-    # ==========================================
-    # --- BARRA LATERAL: FILTROS MÚLTIPLES ---
-    # ==========================================
-    st.sidebar.header("🔍 Filtros Avanzados")
-    
-    if st.sidebar.button("🔄 Restablecer Filtros"):
-        st.session_state.date_range = (min_date, max_date)
-        st.session_state.artistas_seleccionados = []
-        st.session_state.canciones_seleccionadas = []
-        st.rerun()
-
-    date_range = st.sidebar.date_input(
-        "📅 Periodo de fechas",
-        min_value=min_date,
-        max_value=max_date,
-        key="date_range"
-    )
-
-    artistas_disponibles = sorted(df['artist_name'].dropna().unique())
-    artistas_seleccionados = st.sidebar.multiselect(
-        "🎤 Filtrar por Artistas", 
-        artistas_disponibles,
-        key="artistas_seleccionados"
-    )
-
-    df_para_canciones = df[df['artist_name'].isin(artistas_seleccionados)] if artistas_seleccionados else df
-    canciones_disponibles = sorted(df_para_canciones['track_name'].dropna().unique())
-    
-    canciones_seleccionadas = st.sidebar.multiselect(
-        "🎶 Filtrar por Canciones", 
-        canciones_disponibles,
-        key="canciones_seleccionadas"
-    )
-
-    # Aplicar filtros de forma acumulativa
     df_filtered = df.copy()
 
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-        mask = (df_filtered['played_at'].dt.date >= start_date) & (df_filtered['played_at'].dt.date <= end_date)
-        df_filtered = df_filtered.loc[mask]
+artistas_disponibles = sorted(df_filtered['artist_name'].dropna().unique().tolist())
+artista_sel = st.sidebar.multiselect("Filtrar por artista", options=artistas_disponibles)
 
-    if artistas_seleccionados:
-        df_filtered = df_filtered[df_filtered['artist_name'].isin(artistas_seleccionados)]
+if artista_sel:
+    df_filtered = df_filtered[df_filtered['artist_name'].isin(artista_sel)]
 
-    if canciones_seleccionadas:
-        df_filtered = df_filtered[df_filtered['track_name'].isin(canciones_seleccionadas)]
+if df_filtered.empty:
+    st.info("No hay reproducciones para los filtros seleccionados.")
+    st.stop()
 
-    # ==========================================
-    # --- MÉTRICAS Y KPIS PRINCIPALES ---
-    # ==========================================
-    total_reproducciones = len(df_filtered)
-    total_ms = df_filtered['duration_ms'].sum() if 'duration_ms' in df_filtered.columns else 0
-    tiempo_escuchado_formateado = formatear_tiempo_total(total_ms)
-    artistas_unicos = df_filtered['artist_name'].nunique()
-    canciones_unicas = df_filtered['track_name'].nunique()
+# ==========================================
+# --- MÉTRICAS Y KPIS PRINCIPALES ---
+# ==========================================
+total_reproducciones = len(df_filtered)
+total_ms = df_filtered['duration_ms'].sum() if 'duration_ms' in df_filtered.columns else 0
+tiempo_escuchado_formateado = formatear_tiempo_total(total_ms)
+artistas_unicos = df_filtered['artist_name'].nunique()
+canciones_unicas = df_filtered['track_name'].nunique()
 
-    if not df_filtered.empty and isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-        dias_totales_rango = (end_date - start_date).days + 1
-        dias_totales_rango = max(dias_totales_rango, 1)
-        promedio_diario_reps = round(total_reproducciones / dias_totales_rango, 1)
-    else:
-        promedio_diario_reps = 0
+if not df_filtered.empty and isinstance(date_range, tuple) and len(date_range) == 2:
+    start_date, end_date = date_range
+    dias_totales_rango = max((end_date - start_date).days + 1, 1)
+    promedio_diario_reps = round(total_reproducciones / dias_totales_rango, 1)
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("🎧 Reproducciones", total_reproducciones)
-    col2.metric("⏱️ Tiempo Escuchado", tiempo_escuchado_formateado)
-    col3.metric("📈 Promedio Diario", f"{promedio_diario_reps} reps/día")
-    col4.metric("🎤 Artistas / 🎶 Canciones", f"{artistas_unicos} / {canciones_unicas}")
+    # Media diaria en formato Xh Ym/día
+    ms_por_dia = total_ms / dias_totales_rango
+    media_diaria_str = f"{formatear_tiempo_total(ms_por_dia)}/día"
+else:
+    promedio_diario_reps = 0
+    media_diaria_str = "0m/día"
 
-    st.markdown("---")
+col1, col2, col3, col4, col5 = st.columns(5)
+col1.metric("🎧 Reproducciones", total_reproducciones)
+col2.metric("⏱️ Tiempo Total", tiempo_escuchado_formateado)
+col3.metric("⌛ Media Diaria", media_diaria_str)
+col4.metric("📈 Reps / Día", f"{promedio_diario_reps} reps/día")
+col5.metric("🎤 Artistas / 🎶 Canciones", f"{artistas_unicos} / {canciones_unicas}")
 
-    # ==========================================
-    # --- TARJETAS DE DESTACADOS ---
-    # ==========================================
-    if not df_filtered.empty:
-        top_artista_val = df_filtered['artist_name'].mode()
-        top_artista_str = top_artista_val.iloc[0] if not top_artista_val.empty else "N/A"
-        
-        def obtener_franja(h):
-            if 6 <= h < 12: return "🌅 Mañana (06:00 - 12:00)"
-            elif 12 <= h < 20: return "☀️ Tarde (12:00 - 20:00)"
-            elif 20 <= h < 24: return "🌙 Noche (20:00 - 00:00)"
-            else: return "🌌 Madrugada (00:00 - 06:00)"
-        
-        franjas = df_filtered['played_at'].dt.hour.apply(obtener_franja)
-        top_franja = franjas.mode()
-        top_franja_str = top_franja.iloc[0] if not top_franja.empty else "N/A"
+st.divider()
 
-        kpi_col1, kpi_col2 = st.columns(2)
-        kpi_col1.info(f"👑 **Artista Top del Periodo:** {top_artista_str}")
-        kpi_col2.info(f"⏰ **Momento Favorito:** {top_franja_str}")
+# ==========================================
+# --- GRÁFICOS PRINCIPALES ---
+# ==========================================
+col_left, col_right = st.columns(2)
 
-    st.markdown("---")
-
-    # ==========================================
-    # --- SECCIÓN DE GRÁFICOS (TOP ORDENADOS CON ALTAIR) ---
-    # ==========================================
-    col_g1, col_g2 = st.columns(2)
-
-    with col_g1:
-        st.subheader("🔥 Artistas Más Reproducidos")
-        top_artistas = df_filtered['artist_name'].value_counts().head(10).reset_index()
-        top_artistas.columns = ['Artista', 'Reproducciones']
-
-        tab_grafico_a, tab_lista_a = st.tabs(["📊 Gráfico", "📋 Ver Lista"])
-        with tab_grafico_a:
-            if not top_artistas.empty:
-                chart_a = alt.Chart(top_artistas).mark_bar().encode(
-                    x=alt.X('Artista:N', sort=None, title='Artista'),
-                    y=alt.Y('Reproducciones:Q', title='Reproducciones')
-                ).properties(height=350)
-                st.altair_chart(chart_a, use_container_width=True)
-            else:
-                st.info("No hay datos para esta selección.")
-        with tab_lista_a:
-            st.dataframe(top_artistas, use_container_width=True, hide_index=True)
-
-    with col_g2:
-        st.subheader("🎵 Canciones Más Reproducidas")
-        top_canciones = df_filtered['track_name'].value_counts().head(10).reset_index()
-        top_canciones.columns = ['Canción', 'Reproducciones']
-
-        tab_grafico_c, tab_lista_c = st.tabs(["📊 Gráfico", "📋 Ver Lista"])
-        with tab_grafico_c:
-            if not top_canciones.empty:
-                chart_c = alt.Chart(top_canciones).mark_bar().encode(
-                    x=alt.X('Canción:N', sort=None, title='Canción'),
-                    y=alt.Y('Reproducciones:Q', title='Reproducciones')
-                ).properties(height=350)
-                st.altair_chart(chart_c, use_container_width=True)
-            else:
-                st.info("No hay datos para esta selección.")
-        with tab_lista_c:
-            st.dataframe(top_canciones, use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-
-    # ==========================================
-    # --- NUEVOS GRÁFICOS ANALÍTICOS ---
-    # ==========================================
-    st.subheader("📈 Evolución Diaria de Reproducciones")
-    df_diario = df_filtered.copy()
-    if not df_diario.empty:
-        df_diario['dia'] = df_diario['played_at'].dt.date
-        conteo_diario = df_diario['dia'].value_counts().sort_index()
-        st.line_chart(conteo_diario)
-    else:
-        st.info("No hay datos para mostrar la evolución temporal.")
-
-    st.markdown("---")
-
-    col_h1, col_h2 = st.columns(2)
-
-    with col_h1:
-        st.subheader("⏰ Hábitos por Hora del Día")
-        if not df_filtered.empty:
-            df_filtered_h = df_filtered.copy()
-            df_filtered_h['hora'] = df_filtered_h['played_at'].dt.hour
-            conteo_horas = df_filtered_h['hora'].value_counts().reindex(range(24), fill_value=0)
-            st.bar_chart(conteo_horas)
-        else:
-            st.info("No hay datos.")
-
-    with col_h2:
-        st.subheader("📅 Distribución por Día de la Semana")
-        if not df_filtered.empty:
-            df_filtered_d = df_filtered.copy()
-            dias_orden = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
-            dias_map = {0: 'Lunes', 1: 'Martes', 2: 'Miércoles', 3: 'Jueves', 4: 'Viernes', 5: 'Sábado', 6: 'Domingo'}
-            
-            df_filtered_d['dia_semana'] = df_filtered_d['played_at'].dt.dayofweek.map(dias_map)
-            df_filtered_d['dia_semana'] = pd.Categorical(df_filtered_d['dia_semana'], categories=dias_orden, ordered=True)
-            
-            conteo_dias = df_filtered_d['dia_semana'].value_counts().sort_index()
-            st.bar_chart(conteo_dias)
-        else:
-            st.info("No hay datos.")
-
-    st.markdown("---")
-
-    # ==========================================
-    # --- TABLA DE HISTORIAL DETALLADO ---
-    # ==========================================
-    st.subheader(f"📜 Historial Detallado ({len(df_filtered)} registros)")
-    
-    df_display = df_filtered.copy()
-    df_display['Duración'] = df_display['duration_ms'].apply(formatear_duracion)
-    df_display['played_at_str'] = df_display['played_at'].dt.strftime('%Y-%m-%d %H:%M:%S')
-
-    st.dataframe(
-        df_display[['played_at_str', 'track_name', 'artist_name', 'album_name', 'Duración']],
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "played_at_str": "Fecha y Hora (España)",
-            "track_name": "Canción",
-            "artist_name": "Artista",
-            "album_name": "Álbum",
-            "Duración": "Duración"
-        }
+with col_left:
+    st.subheader("🏆 Top 10 Artistas")
+    top_artistas = (
+        df_filtered.groupby('artist_name', as_index=False)
+        .agg(reproducciones=('track_name', 'count'), minutos=('minutos', 'sum'))
+        .sort_values(by='reproducciones', ascending=False)
+        .head(10)
     )
+    fig_artistas = px.bar(
+        top_artistas,
+        x='reproducciones',
+        y='artist_name',
+        orientation='h',
+        text='reproducciones',
+        color='reproducciones',
+        color_continuous_scale='Greens',
+        labels={'reproducciones': 'Reproducciones', 'artist_name': 'Artista'}
+    )
+    fig_artistas.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False, coloraxis_showscale=False)
+    st.plotly_chart(fig_artistas, use_container_width=True)
+
+with col_right:
+    st.subheader("🎵 Top 10 Canciones")
+    top_canciones = (
+        df_filtered.groupby(['track_name', 'artist_name'], as_index=False)
+        .agg(reproducciones=('played_at', 'count'))
+        .sort_values(by='reproducciones', ascending=False)
+        .head(10)
+    )
+    top_canciones['etiqueta'] = top_canciones['track_name'] + " - " + top_canciones['artist_name']
+    fig_canciones = px.bar(
+        top_canciones,
+        x='reproducciones',
+        y='etiqueta',
+        orientation='h',
+        text='reproducciones',
+        color='reproducciones',
+        color_continuous_scale='Tealgrn',
+        labels={'reproducciones': 'Reproducciones', 'etiqueta': 'Canción'}
+    )
+    fig_canciones.update_layout(yaxis={'categoryorder': 'total ascending'}, showlegend=False, coloraxis_showscale=False)
+    st.plotly_chart(fig_canciones, use_container_width=True)
+
+st.divider()
+
+# ==========================================
+# --- EVOLUCIÓN DIARIA Y HÁBITOS ---
+# ==========================================
+col_ev, col_hora = st.columns(2)
+
+with col_ev:
+    st.subheader("📅 Evolución Diaria (Minutos escuchados)")
+    diario = (
+        df_filtered.groupby('fecha', as_index=False)
+        .agg(minutos=('minutos', 'sum'), reproducciones=('track_name', 'count'))
+        .sort_values('fecha')
+    )
+    diario['minutos'] = diario['minutos'].round(1)
+    fig_diario = px.area(
+        diario,
+        x='fecha',
+        y='minutos',
+        markers=True,
+        labels={'fecha': 'Fecha', 'minutos': 'Minutos'}
+    )
+    fig_diario.update_traces(line_color='#1DB954')
+    st.plotly_chart(fig_diario, use_container_width=True)
+
+with col_hora:
+    st.subheader("🕒 Actividad por Hora del Día")
+    por_hora = (
+        df_filtered.groupby('hora', as_index=False)
+        .agg(reproducciones=('track_name', 'count'))
+    )
+    horas_completas = pd.DataFrame({'hora': range(24)})
+    por_hora = horas_completas.merge(por_hora, on='hora', how='left').fillna(0)
+    fig_hora = px.bar(
+        por_hora,
+        x='hora',
+        y='reproducciones',
+        labels={'hora': 'Hora (0-23h)', 'reproducciones': 'Reproducciones'}
+    )
+    fig_hora.update_traces(marker_color='#1DB954')
+    fig_hora.update_xaxes(dtick=2)
+    st.plotly_chart(fig_hora, use_container_width=True)
+
+st.divider()
+
+# ==========================================
+# --- HISTORIAL DETALLADO ---
+# ==========================================
+st.subheader(f"📜 Historial Detallado ({len(df_filtered)} registros)")
+
+tabla_mostrar = df_filtered[['played_at_es', 'track_name', 'artist_name', 'album_name', 'minutos']].copy()
+tabla_mostrar['Fecha y Hora (España)'] = tabla_mostrar['played_at_es'].dt.strftime('%Y-%m-%d %H:%M:%S')
+tabla_mostrar['Duración (min)'] = tabla_mostrar['minutos'].round(2)
+
+tabla_final = tabla_mostrar[['Fecha y Hora (España)', 'track_name', 'artist_name', 'album_name', 'Duración (min)']].rename(
+    columns={
+        'track_name': 'Canción',
+        'artist_name': 'Artista',
+        'album_name': 'Álbum'
+    }
+)
+
+st.dataframe(tabla_final, use_container_width=True, hide_index=True)
