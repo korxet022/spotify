@@ -1,5 +1,4 @@
 import os
-from datetime import datetime, timedelta
 import pandas as pd
 import plotly.express as px
 import streamlit as st
@@ -136,6 +135,12 @@ artista_sel = st.sidebar.multiselect("Filtrar por artista", options=artistas_dis
 if artista_sel:
     df_filtered = df_filtered[df_filtered['artist_name'].isin(artista_sel)]
 
+canciones_disponibles = sorted(df_filtered['track_name'].dropna().unique().tolist())
+cancion_sel = st.sidebar.multiselect("Filtrar por canción", options=canciones_disponibles)
+
+if cancion_sel:
+    df_filtered = df_filtered[df_filtered['track_name'].isin(cancion_sel)]
+
 if df_filtered.empty:
     st.info("No hay reproducciones para los filtros seleccionados.")
     st.stop()
@@ -149,7 +154,7 @@ tiempo_escuchado_formateado = formatear_tiempo_total(total_ms)
 artistas_unicos = df_filtered['artist_name'].nunique()
 canciones_unicas = df_filtered['track_name'].nunique()
 
-if not df_filtered.empty and isinstance(date_range, tuple) and len(date_range) == 2:
+if isinstance(date_range, tuple) and len(date_range) == 2:
     start_date, end_date = date_range
     dias_totales_rango = max((end_date - start_date).days + 1, 1)
     promedio_diario_reps = round(total_reproducciones / dias_totales_rango, 1)
