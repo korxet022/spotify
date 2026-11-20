@@ -38,6 +38,15 @@ def formatear_tiempo_total(ms):
     return f"{minutos}m"
 
 
+def formatear_duracion_cancion(ms):
+    if pd.isna(ms) or ms <= 0:
+        return "0:00"
+    total_segundos = int(round(ms / 1000.0))
+    minutos = total_segundos // 60
+    segundos = total_segundos % 60
+    return f"{minutos}:{segundos:02d}"
+
+
 @st.cache_data(ttl=60)
 def cargar_datos():
     all_rows = []
@@ -89,9 +98,11 @@ def cargar_datos():
     if 'duration_ms' in df.columns:
         df['duration_ms'] = pd.to_numeric(df['duration_ms'], errors='coerce').fillna(0)
         df['minutos'] = df['duration_ms'] / 60000.0
+        df['duracion_mmss'] = df['duration_ms'].apply(formatear_duracion_cancion)
     else:
         df['duration_ms'] = 0
         df['minutos'] = 0.0
+        df['duracion_mmss'] = "0:00"
 
     return df
 
@@ -273,15 +284,15 @@ st.divider()
 # ==========================================
 st.subheader(f"📜 Historial Detallado ({len(df_filtered)} registros)")
 
-tabla_mostrar = df_filtered[['played_at_es', 'track_name', 'artist_name', 'album_name', 'minutos']].copy()
+tabla_mostrar = df_filtered[['played_at_es', 'track_name', 'artist_name', 'album_name', 'duracion_mmss']].copy()
 tabla_mostrar['Fecha y Hora (España)'] = tabla_mostrar['played_at_es'].dt.strftime('%Y-%m-%d %H:%M:%S')
-tabla_mostrar['Duración (min)'] = tabla_mostrar['minutos'].round(2)
 
-tabla_final = tabla_mostrar[['Fecha y Hora (España)', 'track_name', 'artist_name', 'album_name', 'Duración (min)']].rename(
+tabla_final = tabla_mostrar[['Fecha y Hora (España)', 'track_name', 'artist_name', 'album_name', 'duracion_mmss']].rename(
     columns={
         'track_name': 'Canción',
         'artist_name': 'Artista',
-        'album_name': 'Álbum'
+        'album_name': 'Álbum',
+        'duracion_mmss': 'Duración'
     }
 )
 
